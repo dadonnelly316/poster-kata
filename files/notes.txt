@@ -1,0 +1,20 @@
+DW Requerments:
+
+• "We only care about starship posters, though we sell starship, charactor and planet posters"
+Use https://swapi.dev/api/starship to satisfy requerment
+
+
+• "We need to know which films the ship appears in and when the film was made to understand potential demographic correlations."
+films - array -- An array of Film URL Resources that this starship has appeared in.
+
+https://swapi.dev/api/films/:id to  to use the "created" key
+
+
+• "We want to be able to summarize the data."
+
+
+• "Customer emails should never be ingested."
+
+
+
+• "We only want to ingest data relevant to our mission."

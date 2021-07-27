@@ -1,0 +1,200 @@
+from numpy import array
+import pandas as pd
+import requests
+import psycopg2 as pg2
+import psycopg2.extras
+import sqlalchemy
+
+
+#to do: make sure that changing dates will update the database
+
+#https://swapi.dev/
+
+
+ENDPOINT = 'https://swapi.dev/api/starships/?page=1'
+ENV = 'dev'
+
+DB_NAME_SOURCE='source'
+DB_USER_SOURCE='reader'
+DB_PASS_SOURCE='badpassword1'
+DB_HOST_SOURCE='localhost'
+
+DB_NAME_DW='dw'
+DB_USER_DW='dw_writer'
+DB_PASS_DW='badpassword2'
+DB_HOST_DW='localhost'
+
+
+def connect(name: str, user: str, pw: str, host: str):
+    try:
+        conn = pg2.connect(dbname=name, user=user, password=pw, host=host)
+        engine = sqlalchemy.create_engine(f'postgresql+psycopg2://{user}:{pw}@{host}/{name}')
+
+    except:
+        raise ValueError('Unable to connect to the source database')
+    return conn,engine
+
+
+def source_fetch(conn: pg2.connect):
+
+    connect,engine=conn #remove unused engine variable???
+
+    curr=connect.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    query = """
+    SELECT DISTINCT POSTER_CONTENT FROM CUSTOMER;
+     """
+
+    curr.execute(query)
+    results= curr.fetchall()
+
+    flatten_results = []
+    for result in results:
+        for res in result:
+            flatten_results.append(res)  #flatten result
+
+
+    print(flatten_results)
+
+    connect.close()
+
+    return flatten_results
+
+
+def query_dw(conn: list, df: pd.DataFrame):
+
+    connect, engine = conn
+
+    curr=connect.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    try:
+        df.to_sql('STAGE_FILMS', engine, index=False, if_exists='replace')
+    except:
+        raise ValueError('Could not write the stage_films table to the database.')
+        
+
+
+    query = """
+
+        INSERT INTO FILMS (film_name, date_filmed, timestamp)
+            SELECT film_name, to_date(release_date,'YYYY-DD-MM'), CURRENT_TIMESTAMP FROM "STAGE_FILMS" WHERE FILM_NAME NOT IN (SELECT FILM_NAME FROM FILMS);
+
+        UPDATE FILMS
+            SET  DATE_FILMED=to_date(SOURCE.RELEASE_DATE,'YYYY-MM-DD')
+                ,TIMESTAMP=CURRENT_DATE
+            FROM (SELECT RELEASE_DATE, FILM_NAME FROM "STAGE_FILMS") AS SOURCE
+            WHERE FILMS.DATE_FILMED!=to_date(SOURCE.RELEASE_DATE,'YYYY-MM-DD')
+                AND FILMS.FILM_NAME=SOURCE.FILM_NAME;
+
+        DROP TABLE "STAGE_FILMS";       
+    """
+    curr.execute(query)
+    connect.commit()
+
+    return
+    
+
+
+    
+
+
+
+
+
+def fetchFilms(end_point_start: str, posters: list):
+    end_point = f'{end_point_start}'
+    films = []
+
+    while True:
+
+        try:
+            r = requests.get(end_point)
+            print(f'called {end_point}')
+        except:
+            raise ValueError(f'Unable to call API. Endpoint: {end_point}.')
+
+        if r.status_code == 200:
+            pass
+        else:
+            raise ValueError(f'The status code was {r.status_code} when 200 was expected.')
+
+        data = r.json()
+
+        for ship in data['results']:
+            if ship['name'] not in posters:
+                continue
+            for film in ship['films']:
+                if film not in films:    
+                    films.append(film)
+
+        end_point=data['next']
+
+        if data['next'] is None:
+            break
+      
+    return films
+
+
+def getCreatedDate(films: list):
+
+    created_dates = []
+    titles=[]
+
+    if not films:
+        raise ValueError(f'The films array is empty')
+
+    for film in films:
+        try:
+            r=requests.get(film)
+        except:
+            raise ValueError(f'Unable to call API. Endpoint: {film}')
+
+        if r.status_code==200:
+            pass
+        else:
+            raise ValueError(f'The status code was {r.status_code} when 200 was expected.') 
+        
+        data=r.json()
+
+        created_dates.append(data['release_date'])
+        titles.append(data['title'])
+
+    return created_dates, titles
+
+
+
+
+    
+
+
+
+
+    
+if __name__ == '__main__':
+    source_conn = connect(name=DB_NAME_SOURCE, user=DB_USER_SOURCE, pw=DB_PASS_SOURCE, host=DB_HOST_SOURCE)
+    source_fetched=source_fetch(conn=source_conn)
+
+
+    film_urls = fetchFilms(end_point_start=ENDPOINT, posters=source_fetched)
+    release_date,film_name = getCreatedDate(film_urls)
+
+
+
+    stg_df = {
+        'release_date': release_date,
+        'film_name': film_name
+    }
+
+    df = pd.DataFrame(stg_df)
+    print(df)
+
+    dw_conn = connect(name=DB_NAME_DW, user=DB_USER_DW, pw=DB_PASS_DW, host=DB_HOST_DW)
+
+    query_dw(conn=dw_conn, df=df)
+
+
+
+    
+
+
+

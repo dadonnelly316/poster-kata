@@ -1,0 +1,32 @@
+version: "3.9"
+   
+services:
+  db_reader:
+    image: postgres
+    volumes:
+      - ./data/db:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=source
+      - POSTGRES_USER=reader
+      - POSTGRES_PASSWORD=badpassword1
+
+  db_reader_writer:
+    image: postgres
+    volumes:
+      - ./data/db:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=dw
+      - POSTGRES_USER=dw_writer
+      - POSTGRES_PASSWORD=badpassword2
+    depends_on: 
+      - db_reader
+
+  # web:
+  #   build: .
+  #   command: python app.py runserver 0.0.0.0:8000
+  #   volumes:
+  #     - .:/code
+  #   ports:
+  #     - "8000:8000"
+  #   depends_on:
+  #     - db_reader_writer

@@ -1,0 +1,30 @@
+-- Table: public.customer
+
+-- DROP TABLE public.customer;
+
+CREATE TABLE public.customer
+(
+    poster_content character varying(18) COLLATE pg_catalog."default",
+    quantity integer,
+    price numeric,
+    email character varying(26) COLLATE pg_catalog."default" NOT NULL,
+    sales_rep character varying(17) COLLATE pg_catalog."default",
+    promo_code character varying(5) COLLATE pg_catalog."default",
+    "timestamp" date,
+    cust_id integer
+)
+
+TABLESPACE pg_default;
+
+ALTER TABLE public.customer
+    OWNER to postgres;
+
+GRANT ALL ON TABLE public.customer TO postgres;
+
+GRANT SELECT ON TABLE public.customer TO reader;
+
+
+
+INSERT INTO CUSTOMER
+	VALUES
+		('Millennium Falcon', 7, 2.9, 'sally_skywalker@gmail.com', 'tej@swposters.com', 'radio', '2021-07-25', 1);
