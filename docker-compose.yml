@@ -1,32 +1,24 @@
 version: "3.9"
    
-services:
-  db_reader:
-    image: postgres
-    volumes:
-      - ./data/db:/var/lib/postgresql/data
-    environment:
-      - POSTGRES_DB=source
-      - POSTGRES_USER=reader
-      - POSTGRES_PASSWORD=badpassword1
+# PORTS -   LOCAL_MACHINE:DOCKER_CONTAINER
 
-  db_reader_writer:
+#BUILD should read my docker file
+services:
+
+
+  db:
     image: postgres
     volumes:
-      - ./data/db:/var/lib/postgresql/data
+      - ./db-data/:/var/lib/postgresql/data/
+    ports:
+      - 5432:5432
     environment:
       - POSTGRES_DB=dw
       - POSTGRES_USER=dw_writer
       - POSTGRES_PASSWORD=badpassword2
-    depends_on: 
-      - db_reader
 
-  # web:
-  #   build: .
-  #   command: python app.py runserver 0.0.0.0:8000
-  #   volumes:
-  #     - .:/code
-  #   ports:
-  #     - "8000:8000"
-  #   depends_on:
-  #     - db_reader_writer
+  pyapp:
+    build: ./
+    command: python app.py
+    depends_on: 
+      - db     

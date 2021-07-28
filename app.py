@@ -5,7 +5,7 @@ import psycopg2 as pg2
 import psycopg2.extras
 import sqlalchemy
 
-
+#https://github.com/dadonnelly316/poster-kata.git
 
 #to do: make sure that changing dates will update the database
 
@@ -17,25 +17,79 @@ ENV = 'dev'
 
 
 #How can the credentials be hashed???
-DB_NAME_SOURCE='source'
-DB_USER_SOURCE='reader'
-DB_PASS_SOURCE='badpassword1'
-DB_HOST_SOURCE='localhost'
-
 DB_NAME_DW='dw'
 DB_USER_DW='dw_writer'
 DB_PASS_DW='badpassword2'
-DB_HOST_DW='localhost'
+DB_HOST_DW='db' #host name resolves to the name of the service that starts the db?
+DB_PORT_DW=5432
 
 
-def connect(name: str, user: str, pw: str, host: str):
+
+def connect(name: str, user: str, pw: str, host: str, port: str):
     try:
-        conn = pg2.connect(dbname=name, user=user, password=pw, host=host)
-        engine = sqlalchemy.create_engine(f'postgresql+psycopg2://{user}:{pw}@{host}/{name}')
+        conn = pg2.connect(dbname=name, user=user, password=pw, host=host, port=port)
+        engine = sqlalchemy.create_engine(f'postgresql+psycopg2://{user}:{pw}@{host}:{port}/{name}')
 
     except:
-        raise ValueError('Unable to connect to the source database')
+        raise ValueError(f'Unable to connect to the {name} database')
     return conn,engine
+
+
+
+def init_databases(conn: pg2.connect):
+    connect, engine = conn
+    curr=connect.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    create_table_query = """
+
+        CREATE TABLE IF NOT EXISTS public.source
+            (
+                poster_content character varying(18) COLLATE pg_catalog."default",
+                quantity integer,
+                price numeric,
+                email character varying(26) COLLATE pg_catalog."default" NOT NULL,
+                sales_rep character varying(17) COLLATE pg_catalog."default",
+                promo_code character varying(5) COLLATE pg_catalog."default",
+                "timestamp" date,
+                cust_id integer
+            );
+
+        CREATE TABLE IF NOT EXISTS public.dw
+            (
+                film_name character varying(200) COLLATE pg_catalog."default" NOT NULL,
+                date_filmed date,
+                poster_content character varying(18) COLLATE pg_catalog."default",
+                price numeric,
+                sales_rep character varying(17) COLLATE pg_catalog."default",
+                promo_code character varying(5) COLLATE pg_catalog."default",
+                "timestamp" date,
+                cust_id integer,
+                source_timestamp date
+            )
+              
+    """
+
+    curr.execute(create_table_query)
+
+
+    query_populate_source = """
+
+            DO
+            $do$
+            BEGIN
+            IF (SELECT COUNT(*) FROM SOURCE)=0 then
+                    INSERT INTO source
+                        VALUES
+                            ('Millennium Falcon', 7, 2.9, 'sally_skywalker@gmail.com', 'tej@swposters.com', 'radio', '2021-07-25', 1);
+            END IF;
+            END
+            $do$
+
+    """
+    curr.execute(query_populate_source)
+    connect.commit()
+    connect.close()
+
 
 
 def source_fetch(conn: pg2.connect):
@@ -51,12 +105,11 @@ def source_fetch(conn: pg2.connect):
         , PROMO_CODE
         , CUST_ID
         , TIMESTAMP AS SOURCE_TIMESTAMP 
-     FROM CUSTOMER;
+     FROM SOURCE;
      """
 
     curr.execute(query)
     results= curr.fetchall()
-
     connect.close()
 
     return results
@@ -69,7 +122,7 @@ def query_dw(conn: list, df: pd.DataFrame):
     curr=connect.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
     try:
-        df.to_sql('STAGE_FILMS3', engine, index=False, if_exists='replace')
+        df.to_sql('STAGE_FILMS', engine, index=False, if_exists='replace')
     except:
         raise ValueError('Could not write the stage_films table to the database.')
         
@@ -77,7 +130,7 @@ def query_dw(conn: list, df: pd.DataFrame):
 
     query = """
 
-        INSERT INTO FILMS (FILM_NAME, DATE_FILMED, POSTER_CONTENT, PRICE, SALES_REP, PROMO_CODE, TIMESTAMP, CUST_ID, SOURCE_TIMESTAMP)
+        INSERT INTO DW (FILM_NAME, DATE_FILMED, POSTER_CONTENT, PRICE, SALES_REP, PROMO_CODE, TIMESTAMP, CUST_ID, SOURCE_TIMESTAMP)
             SELECT FILM_NAME
                  , CAST(RELEASE_DATE AS DATE)
                  , SHIP_NAMES
@@ -87,17 +140,17 @@ def query_dw(conn: list, df: pd.DataFrame):
                  , CURRENT_DATE
                  , CUST_ID
                  , SOURCE_TIMESTAMP
-        FROM "STAGE_FILMS3"
-        WHERE (FILM_NAME, SHIP_NAMES, CUST_ID) NOT IN (SELECT FILM_NAME, POSTER_CONTENT, CUST_ID FROM FILMS);
+        FROM "STAGE_FILMS"
+        WHERE (FILM_NAME, SHIP_NAMES, CUST_ID) NOT IN (SELECT FILM_NAME, POSTER_CONTENT, CUST_ID FROM DW);
 
-        UPDATE FILMS
+        UPDATE DW
             SET   DATE_FILMED=SOURCE.RELEASE_DATE
                 , TIMESTAMP=CURRENT_DATE
-            FROM (SELECT DISTINCT CAST(RELEASE_DATE AS DATE) AS RELEASE_DATE ,FILM_NAME FROM "STAGE_FILMS3") AS SOURCE
-            WHERE FILMS.DATE_FILMED!=SOURCE.RELEASE_DATE                                         --NULL SHOULDN'T BE CONSIDERED WHEN USING THE != OPERATOR
-                AND FILMS.FILM_NAME=SOURCE.FILM_NAME;
+            FROM (SELECT DISTINCT CAST(RELEASE_DATE AS DATE) AS RELEASE_DATE ,FILM_NAME FROM "STAGE_FILMS") AS SOURCE
+            WHERE DW.DATE_FILMED!=SOURCE.RELEASE_DATE                                         --NULL SHOULDN'T BE CONSIDERED WHEN USING THE != OPERATOR
+                AND DW.FILM_NAME=SOURCE.FILM_NAME;
 
-        UPDATE FILMS
+        UPDATE DW
             SET   POSTER_CONTENT=SOURCE.SHIP_NAMES
                 , PRICE=SOURCE.PRICE
                 , SALES_REP=SOURCE.SALES_REP
@@ -113,23 +166,18 @@ def query_dw(conn: list, df: pd.DataFrame):
                     , CUST_ID
                     , CAST(SOURCE_TIMESTAMP AS DATE) AS SOURCE_TIMESTAMP
                     , FILM_NAME  
-                FROM "STAGE_FILMS3") AS SOURCE
-            WHERE FILMS.SOURCE_TIMESTAMP!=SOURCE.SOURCE_TIMESTAMP              --NULL SHOULDN'T BE CONSIDERED WHEN USING THE != OPERATOR
-                AND FILMS.FILM_NAME=SOURCE.FILM_NAME
-                AND FILMS.POSTER_CONTENT=SOURCE.SHIP_NAMES
-                AND FILMS.CUST_ID=SOURCE.CUST_ID;
+                FROM "STAGE_FILMS") AS SOURCE
+            WHERE DW.SOURCE_TIMESTAMP!=SOURCE.SOURCE_TIMESTAMP              --NULL SHOULDN'T BE CONSIDERED WHEN USING THE != OPERATOR
+                AND DW.FILM_NAME=SOURCE.FILM_NAME
+                AND DW.POSTER_CONTENT=SOURCE.SHIP_NAMES
+                AND DW.CUST_ID=SOURCE.CUST_ID;
 
-        DROP TABLE "STAGE_FILMS3";       
+        DROP TABLE "STAGE_FILMS";       
     """
     curr.execute(query)
-
-
-
-
-
-
     connect.commit()
-
+    connect.close()
+    
     return
     
 
@@ -214,8 +262,13 @@ def getCreatedDate(films: list):
 
     
 if __name__ == '__main__':
-    source_conn = connect(name=DB_NAME_SOURCE, user=DB_USER_SOURCE, pw=DB_PASS_SOURCE, host=DB_HOST_SOURCE)
-    source_fetched=source_fetch(conn=source_conn) #returns customer database
+
+    init_connected = connect(name=DB_NAME_DW, user=DB_USER_DW, pw=DB_PASS_DW, host=DB_HOST_DW, port=DB_PORT_DW) #connect to the database, pass connection into functions that connect to the database
+    init_databases(conn=init_connected)
+
+    #must run this again since the previous query closes the connection
+    source_connected = connect(name=DB_NAME_DW, user=DB_USER_DW, pw=DB_PASS_DW, host=DB_HOST_DW, port=DB_PORT_DW) #connect to the database, pass connection into functions that connect to the database
+    source_fetched=source_fetch(conn=source_connected) #returns source database
 
 
     unique_poster = []
@@ -248,7 +301,7 @@ if __name__ == '__main__':
 
 
 
-    #Take the result of querying the customer database and put columns into lists (comes in as multi-dimensional array)
+    #Take the result of querying the source database and put columns into lists (comes in as multi-dimensional array)
     poster_cust=[]
     price=[]
     sales_rep=[]
@@ -283,9 +336,9 @@ if __name__ == '__main__':
     print(source_df)
     # print(df)
 
-    dw_conn = connect(name=DB_NAME_DW, user=DB_USER_DW, pw=DB_PASS_DW, host=DB_HOST_DW)
-
-    query_dw(conn=dw_conn, df=df)
+    #must run this again since the previous query closes the connection
+    dw_connected = connect(name=DB_NAME_DW, user=DB_USER_DW, pw=DB_PASS_DW, host=DB_HOST_DW, port=DB_PORT_DW) #connect to the database, pass connection into functions that connect to the database
+    query_dw(conn=dw_connected, df=df)
 
 
 
